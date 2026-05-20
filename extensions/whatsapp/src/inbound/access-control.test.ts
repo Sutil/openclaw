@@ -32,8 +32,9 @@ async function checkUnauthorizedWorkDmSender() {
   });
 }
 
-function expectSilentlyBlocked(result: { allowed: boolean }) {
+function expectSilentlyBlocked(result: { allowed: boolean; shouldMarkRead: boolean }) {
   expect(result.allowed).toBe(false);
+  expect(result.shouldMarkRead).toBe(false);
   expect(upsertPairingRequestMock).not.toHaveBeenCalled();
   expect(sendMessageMock).not.toHaveBeenCalled();
 }
@@ -407,5 +408,100 @@ describe("WhatsApp dmPolicy precedence", () => {
 
     expect(result.allowed).toBe(true);
     expect(result.isSelfChat).toBe(true);
+  });
+});
+
+describe("dmPolicy: open-except", () => {
+  it("silently blocks a sender in manualFrom", async () => {
+    setAccessControlTestConfig({
+      channels: {
+        whatsapp: {
+          dmPolicy: "open-except",
+          manualFrom: ["+15550001111"],
+        },
+      },
+    });
+    const result = await checkInboundAccessControl({
+      cfg: getAccessControlTestConfig() as never,
+      accountId: "default",
+      from: "+15550001111@s.whatsapp.net",
+      selfE164: "+15550009999",
+      senderE164: "+15550001111",
+      group: false,
+      isFromMe: false,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "15550001111@s.whatsapp.net",
+    });
+    expectSilentlyBlocked(result);
+  });
+
+  it("allows a sender not in manualFrom", async () => {
+    setAccessControlTestConfig({
+      channels: {
+        whatsapp: {
+          dmPolicy: "open-except",
+          manualFrom: ["+15550001111"],
+        },
+      },
+    });
+    const result = await checkInboundAccessControl({
+      cfg: getAccessControlTestConfig() as never,
+      accountId: "default",
+      from: "+15550002222@s.whatsapp.net",
+      selfE164: "+15550009999",
+      senderE164: "+15550002222",
+      group: false,
+      isFromMe: false,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "15550002222@s.whatsapp.net",
+    });
+    expect(result.allowed).toBe(true);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("matches manualFrom with or without leading +", async () => {
+    setAccessControlTestConfig({
+      channels: {
+        whatsapp: {
+          dmPolicy: "open-except",
+          manualFrom: ["5511999988888"],
+        },
+      },
+    });
+    const result = await checkInboundAccessControl({
+      cfg: getAccessControlTestConfig() as never,
+      accountId: "default",
+      from: "+5511999988888@s.whatsapp.net",
+      selfE164: "+15550009999",
+      senderE164: "+5511999988888",
+      group: false,
+      isFromMe: false,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "5511999988888@s.whatsapp.net",
+    });
+    expectSilentlyBlocked(result);
+  });
+
+  it("allows all DMs when manualFrom is empty", async () => {
+    setAccessControlTestConfig({
+      channels: {
+        whatsapp: {
+          dmPolicy: "open-except",
+          manualFrom: [],
+        },
+      },
+    });
+    const result = await checkInboundAccessControl({
+      cfg: getAccessControlTestConfig() as never,
+      accountId: "default",
+      from: "+15550001111@s.whatsapp.net",
+      selfE164: "+15550009999",
+      senderE164: "+15550001111",
+      group: false,
+      isFromMe: false,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "15550001111@s.whatsapp.net",
+    });
+    expect(result.allowed).toBe(true);
   });
 });
