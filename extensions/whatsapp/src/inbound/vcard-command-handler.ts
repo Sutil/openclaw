@@ -3,14 +3,13 @@ import { updateConfig } from "openclaw/plugin-sdk/config-mutation";
 import { normalizeE164 } from "../text-runtime.js";
 import { parseVcard } from "../vcard.js";
 
-export type VcardCommandResult = "added" | "removed" | "already" | "not-found" | null;
+export type VcardCommandResult = "added" | "removed" | null;
 
 export type VcardCommandParams = {
   fromMe: boolean;
   selfChatMode: boolean;
   configWrites: boolean;
-  command: string;
-  quotedVcard: string | undefined;
+  directVcard: string | undefined;
   selfJid: string;
   remoteJid: string;
   accountId: string;
@@ -57,44 +56,20 @@ export async function handleVcardCommand(params: VcardCommandParams): Promise<Vc
   if (!params.selfChatMode || !params.configWrites) return null;
   if (!params.fromMe) return null;
   if (params.remoteJid !== params.selfJid) return null;
-  if (!params.quotedVcard) return null;
+  if (!params.directVcard) return null;
 
-  const cmd = params.command.trim().toLowerCase();
-  if (cmd !== "add" && cmd !== "rm") return null;
-
-  const parsed = parseVcard(params.quotedVcard);
+  const parsed = parseVcard(params.directVcard);
   if (parsed.phones.length === 0) return null;
 
   const phone = normalizeE164(parsed.phones[0]);
 
-  if (cmd === "add") {
-    let outcome: "added" | "already" = "already";
-    await updateConfig((cfg) => {
-      const list = readManualFrom(cfg, params.accountId);
-      const isPresent = list.map(normalizeE164).some((e) => e === phone);
-      if (isPresent) {
-        outcome = "already";
-        return cfg;
-      }
-      outcome = "added";
-      return writeManualFrom(cfg, params.accountId, [...list, phone]);
-    });
-    if (outcome === "already") {
-      await params.sendMessage(params.selfJid, { text: "Already in manual list" });
-      return "already";
-    }
-    await params.sendMessage(params.selfJid, { text: `Added ${phone} to manual list` });
-    return "added";
-  }
-
-  // cmd === "rm": single atomic mutator — read and write in one call.
-  let outcome: "removed" | "not-found" = "not-found";
+  let outcome: "added" | "removed" = "added";
   await updateConfig((cfg) => {
     const list = readManualFrom(cfg, params.accountId);
     const idx = list.map(normalizeE164).findIndex((e) => e === phone);
     if (idx === -1) {
-      outcome = "not-found";
-      return cfg;
+      outcome = "added";
+      return writeManualFrom(cfg, params.accountId, [...list, phone]);
     }
     outcome = "removed";
     return writeManualFrom(
@@ -103,10 +78,9 @@ export async function handleVcardCommand(params: VcardCommandParams): Promise<Vc
       list.filter((_, i) => i !== idx),
     );
   });
-  if (outcome === "not-found") {
-    await params.sendMessage(params.selfJid, { text: "Not in manual list" });
-    return "not-found";
-  }
-  await params.sendMessage(params.selfJid, { text: `Removed ${phone} from manual list` });
-  return "removed";
+
+  const text =
+    outcome === "added" ? `Added ${phone} to manual list` : `Removed ${phone} from manual list`;
+  await params.sendMessage(params.selfJid, { text });
+  return outcome;
 }

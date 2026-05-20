@@ -18,8 +18,7 @@ function makeParams(
     fromMe: boolean;
     selfChatMode: boolean;
     configWrites: boolean;
-    command: string;
-    quotedVcard: string | undefined;
+    directVcard: string | undefined;
     selfJid: string;
     remoteJid: string;
     accountId: string;
@@ -29,8 +28,7 @@ function makeParams(
     fromMe: overrides.fromMe ?? true,
     selfChatMode: overrides.selfChatMode ?? true,
     configWrites: overrides.configWrites ?? true,
-    command: overrides.command ?? "add",
-    quotedVcard: "quotedVcard" in overrides ? overrides.quotedVcard : SAMPLE_VCARD,
+    directVcard: "directVcard" in overrides ? overrides.directVcard : SAMPLE_VCARD,
     selfJid: overrides.selfJid ?? SELF_JID,
     remoteJid: overrides.remoteJid ?? SELF_JID,
     accountId: overrides.accountId ?? "default",
@@ -72,27 +70,21 @@ describe("handleVcardCommand", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when quotedVcard is absent", async () => {
-    const result = await handleVcardCommand(makeParams({ quotedVcard: undefined }));
-    expect(result).toBeNull();
-  });
-
-  it("returns null for unrecognized command", async () => {
-    const result = await handleVcardCommand(makeParams({ command: "delete" }));
+  it("returns null when directVcard is absent", async () => {
+    const result = await handleVcardCommand(makeParams({ directVcard: undefined }));
     expect(result).toBeNull();
   });
 
   it("returns null when vcard has no phone", async () => {
-    const result = await handleVcardCommand({
-      ...makeParams(),
-      quotedVcard: "BEGIN:VCARD\nVERSION:3.0\nFN:John\nEND:VCARD",
-    });
+    const result = await handleVcardCommand(
+      makeParams({ directVcard: "BEGIN:VCARD\nVERSION:3.0\nFN:John\nEND:VCARD" }),
+    );
     expect(result).toBeNull();
   });
 
-  it("add: adds phone and replies confirmation", async () => {
+  it("adds phone when not in list and replies confirmation", async () => {
     mockConfig([]);
-    const result = await handleVcardCommand(makeParams({ command: "add" }));
+    const result = await handleVcardCommand(makeParams());
     expect(result).toBe("added");
     expect(updateConfigMock).toHaveBeenCalledOnce();
     expect(sendMessageMock).toHaveBeenCalledWith(SELF_JID, {
@@ -100,40 +92,19 @@ describe("handleVcardCommand", () => {
     });
   });
 
-  it("add: replies already-in-list when phone is present", async () => {
+  it("removes phone when already in list and replies confirmation", async () => {
     mockConfig(["+5511999988888"]);
-    const result = await handleVcardCommand(makeParams({ command: "add" }));
-    expect(result).toBe("already");
-    expect(updateConfigMock).toHaveBeenCalledTimes(1); // read-only pass
-    expect(sendMessageMock).toHaveBeenCalledWith(SELF_JID, { text: "Already in manual list" });
-  });
-
-  it("rm: removes phone and replies confirmation", async () => {
-    mockConfig(["+5511999988888"]);
-    const result = await handleVcardCommand(makeParams({ command: "rm" }));
+    const result = await handleVcardCommand(makeParams());
     expect(result).toBe("removed");
-    expect(updateConfigMock).toHaveBeenCalledTimes(1); // single atomic read+write pass
+    expect(updateConfigMock).toHaveBeenCalledOnce();
     expect(sendMessageMock).toHaveBeenCalledWith(SELF_JID, {
       text: "Removed +5511999988888 from manual list",
     });
   });
 
-  it("rm: replies not-in-list when phone is absent", async () => {
-    mockConfig([]);
-    const result = await handleVcardCommand(makeParams({ command: "rm" }));
-    expect(result).toBe("not-found");
-    expect(updateConfigMock).toHaveBeenCalledTimes(1); // read-only pass
-    expect(sendMessageMock).toHaveBeenCalledWith(SELF_JID, { text: "Not in manual list" });
-  });
-
-  it("command matching is case-insensitive", async () => {
-    const result = await handleVcardCommand(makeParams({ command: "ADD" }));
-    expect(result).toBe("added");
-  });
-
-  it("command matching trims whitespace", async () => {
-    const result = await handleVcardCommand(makeParams({ command: "  rm  " }));
-    // no phone in list, so not-found
-    expect(result).toBe("not-found");
+  it("normalizes phone before comparison (no leading +)", async () => {
+    mockConfig(["5511999988888"]);
+    const result = await handleVcardCommand(makeParams());
+    expect(result).toBe("removed");
   });
 });

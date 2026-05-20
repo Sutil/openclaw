@@ -31,7 +31,6 @@ import {
 } from "./dedupe.js";
 import {
   describeReplyContext,
-  extractContextInfo,
   extractLocationData,
   extractContactContext,
   extractMediaPlaceholder,
@@ -794,25 +793,6 @@ export async function attachWebInboxToSocket(
         fromMe: inboundMessage.fromMe,
       });
     }
-    if (inbound.access.isSelfChat && Boolean(msg.key?.fromMe)) {
-      const contextInfo = extractContextInfo(msg.message as proto.IMessage | undefined);
-      const quotedVcard = contextInfo?.quotedMessage?.contactMessage?.vcard ?? undefined;
-      const liveCfg = options.loadConfig?.() ?? options.cfg;
-      const vcardResult = await handleVcardCommand({
-        fromMe: true,
-        selfChatMode: true,
-        configWrites: Boolean(liveCfg.channels?.whatsapp?.configWrites),
-        command: enriched.body,
-        quotedVcard,
-        selfJid: self.jid ?? "",
-        remoteJid: inbound.remoteJid,
-        accountId: options.accountId,
-        sendMessage: (jid, content) => sendTrackedMessage(jid, content),
-      });
-      if (vcardResult !== null) {
-        return;
-      }
-    }
     try {
       const task = Promise.resolve(debouncer.enqueue(inboundMessage));
       void task.catch((err) => {
@@ -844,6 +824,27 @@ export async function attachWebInboxToSocket(
         const msgTsNum = msgTsRaw != null ? Number(msgTsRaw) : Number.NaN;
         const msgTsMs = Number.isFinite(msgTsNum) ? msgTsNum * 1000 : 0;
         if (msgTsMs < connectedAtMs - APPEND_RECENT_GRACE_MS) {
+          continue;
+        }
+      }
+
+      // Contact card messages have no text body and won't survive enrichment —
+      // handle self-chat vCard toggle before enrichInboundMessage runs.
+      if (inbound.access.isSelfChat && Boolean(msg.key?.fromMe)) {
+        const directVcard =
+          (msg.message?.contactMessage?.vcard as string | null | undefined) ?? undefined;
+        if (directVcard) {
+          const liveCfg = options.loadConfig?.() ?? options.cfg;
+          await handleVcardCommand({
+            fromMe: true,
+            selfChatMode: true,
+            configWrites: Boolean(liveCfg.channels?.whatsapp?.configWrites),
+            directVcard,
+            selfJid: self.jid ?? "",
+            remoteJid: inbound.remoteJid,
+            accountId: options.accountId,
+            sendMessage: (jid, content) => sendTrackedMessage(jid, content),
+          });
           continue;
         }
       }
